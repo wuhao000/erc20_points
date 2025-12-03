@@ -14,12 +14,19 @@ type PointRecordRepository interface {
   GetByUserId(userId uint64) ([]model.PointRecord, error)
   GetByNetworkId(networkId uint64) ([]model.PointRecord, error)
   GetByAddress(address string) (*model.PointRecord, error)
-  FindByNetworkIdAndAddresses(id uint64, addresses []string) []model.PointRecord
+  FindByNetworkId(id uint64) []model.PointRecord
   SaveOrUpdateAll(prs []*model.PointRecord)
+  FindAddressesByNetworkId(networkId uint64) []string
 }
 
 type PointRecordRepositoryImpl struct {
   db *gorm.DB
+}
+
+func (p PointRecordRepositoryImpl) FindAddressesByNetworkId(networkId uint64) []string {
+  var addresses []string
+  p.db.Model(&model.PointRecord{}).Select("address").Where("network_id = ?", networkId).Find(&addresses)
+  return addresses
 }
 
 func (p PointRecordRepositoryImpl) SaveOrUpdateAll(prs []*model.PointRecord) {
@@ -29,14 +36,14 @@ func (p PointRecordRepositoryImpl) SaveOrUpdateAll(prs []*model.PointRecord) {
   p.db.Clauses(clause.OnConflict{
     Columns: []clause.Column{{Name: "id"}}, // 冲突键
     DoUpdates: clause.AssignmentColumns([]string{
-      "balance", "points", " ",
+      "balance", "points", "last_updated",
     }),
   }).Create(&prs)
 }
 
-func (p PointRecordRepositoryImpl) FindByNetworkIdAndAddresses(id uint64, addresses []string) []model.PointRecord {
+func (p PointRecordRepositoryImpl) FindByNetworkId(id uint64) []model.PointRecord {
   records := make([]model.PointRecord, 0)
-  p.db.Model(&model.PointRecord{}).Where("network_id = ? AND address IN (?)", id, addresses).Find(&records)
+  p.db.Model(&model.PointRecord{}).Where("network_id = ?", id).Find(&records)
   return records
 }
 

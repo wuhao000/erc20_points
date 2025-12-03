@@ -131,7 +131,7 @@ func syncBlock(
     modelEvent.ChainId = chainConfig.ChainId
     modelEvent.NetworkId = chainConfig.ChainId
     modelEvent.Hash = logUniqueID(log).String()
-    modelEvent.Time = log.BlockTimestamp
+    modelEvent.Time = time.Unix(int64(log.BlockTimestamp), 0)
     var evt interface{}
 
     switch eventHash {
@@ -148,8 +148,8 @@ func syncBlock(
       transferRecord.ChainId = chainConfig.ChainId
       transferRecord.FromAddress = e.From.String()
       transferRecord.ToAddress = e.To.String()
-      transferRecord.Value = e.Value.Uint64()
-      transferRecord.Time = log.BlockTimestamp
+      transferRecord.Value = e.Value.Int64()
+      transferRecord.Time = time.Unix(int64(log.BlockTimestamp), 0)
       transferRecord.Hash = modelEvent.Hash
       if _, ok := transferSeen[transferRecord.Hash]; !ok {
         transferRecords = append(transferRecords, transferRecord)

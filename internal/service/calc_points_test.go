@@ -3,6 +3,7 @@ package service
 import (
   "fmt"
   "testing"
+  "time"
 
   "com.wh1200.points/internal/config"
   "com.wh1200.points/internal/model"
@@ -19,7 +20,7 @@ func TestCalc(t *testing.T) {
     ToAddress:   address,
     Value:       50,
     BlockNumber: 100,
-    Time:        1000,
+    Time:        time.Unix(1000, 0),
   })
 
   transferRecords = append(transferRecords, model.TransferRecord{
@@ -27,7 +28,7 @@ func TestCalc(t *testing.T) {
     ToAddress:   anotherAddress,
     Value:       50,
     BlockNumber: 101,
-    Time:        2000,
+    Time:        time.Unix(2000, 0),
   })
 
   transferRecords = append(transferRecords, model.TransferRecord{
@@ -35,7 +36,7 @@ func TestCalc(t *testing.T) {
     ToAddress:   address,
     Value:       50,
     BlockNumber: 102,
-    Time:        3000,
+    Time:        time.Unix(3000, 0),
   })
 
   cfg := &config.ChainConfig{}

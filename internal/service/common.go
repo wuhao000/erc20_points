@@ -9,7 +9,7 @@ var db *gorm.DB
 
 var userRepository repository.UserRepository
 
-var pointRepository repository.PointRecordRepository
+var pointRecordRepository repository.PointRecordRepository
 
 var eventRepository repository.EventRepository
 
@@ -22,7 +22,7 @@ var transferRecordRepository repository.TransferRecordRepository
 func InjectRepositories(_db *gorm.DB) {
   db = _db
   userRepository = repository.NewUserRepository(_db)
-  pointRepository = repository.NewPointRecordRepository(_db)
+  pointRecordRepository = repository.NewPointRecordRepository(_db)
   eventRepository = repository.NewEventRepository(_db)
   networkRepository = repository.NewNetworkRepository(_db)
   pointChangeRecordRepository = repository.NewPointChangeRecordRepository(_db)

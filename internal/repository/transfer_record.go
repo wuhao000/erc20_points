@@ -20,6 +20,7 @@ type TransferRecordRepository interface {
   FindExistsHashes(hashes []string) []string
   GetBalanceOfAll(networkId uint64) []Balance
   GetAllNotCalc(networkId uint64) []model.TransferRecord
+  UpdateCalcStatusByIds(records []uint64, status int)
 }
 
 type TransferRecordRepositoryImpl struct {
@@ -31,9 +32,17 @@ type Balance struct {
   Balance uint64
 }
 
+func (t TransferRecordRepositoryImpl) UpdateCalcStatusByIds(ids []uint64, status int) {
+  if len(ids) == 0 {
+    return
+  }
+  t.db.Model(&model.TransferRecord{}).Where("id IN (?)", ids).Update("calc_status", status)
+}
+
 func (t TransferRecordRepositoryImpl) GetAllNotCalc(networkId uint64) []model.TransferRecord {
   records := make([]model.TransferRecord, 0)
-  t.db.Model(&model.TransferRecord{}).Where("network_id = ? and calc_status = ?", networkId, 0).Find(&records)
+  t.db.Model(&model.TransferRecord{}).Where("network_id = ? and calc_status = ?", networkId, 0).
+    Order("id").Find(&records)
   return records
 }
 func (t TransferRecordRepositoryImpl) GetBalanceOfAll(networkId uint64) []Balance {
