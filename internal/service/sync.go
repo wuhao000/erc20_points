@@ -11,37 +11,32 @@ import (
   "com.wh1200.points/internal/chain"
   "com.wh1200.points/internal/config"
   "com.wh1200.points/internal/model"
+  "com.wh1200.points/internal/repository"
   "github.com/ethereum/go-ethereum"
   "github.com/ethereum/go-ethereum/common"
   "github.com/ethereum/go-ethereum/core/types"
   "github.com/ethereum/go-ethereum/crypto"
+  "github.com/zeromicro/go-zero/core/stores/kv"
   "github.com/zeromicro/go-zero/core/threading"
 )
 
 const (
-  APPROVAL_HASH = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-  TRANSFER_HASH = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-  MINT_HASH     = "0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885"
-  BURN_HASH     = "0xcc16f5dbb4873280815c1ee09dbd06736cffcc184412cf7a71a0fdb75d397ca5"
+  ApprovalHash = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+  TransferHash = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+  MintHash     = "0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885"
+  BurnHash     = "0xcc16f5dbb4873280815c1ee09dbd06736cffcc184412cf7a71a0fdb75d397ca5"
 )
 
-func Start() {
-  for _, chainConfig := range config.Cfg.Chains {
-    startSyncTask(&chainConfig)
-    startCalcPointsTask(&chainConfig)
-  }
-}
-
 func startSyncTask(config *config.ChainConfig) {
-  kv := getKvStore()
+  kvStore := getKvStore()
   threading.GoSafe(func() {
     interval := config.PollingInterval
 
     if interval <= 0 {
-      interval = 10
+      interval = 10 // 如果没有设置，默认10秒轮询
     }
 
-    sem := make(chan struct{}, 1) // 最大同时运行1个任务
+    sem := make(chan struct{}, 1) // 因为同步执行是异步的，所以要限制最大同时运行1个任务
     for {
       sem <- struct{}{} // 占用
       threading.GoSafe(func() {
@@ -51,57 +46,86 @@ func startSyncTask(config *config.ChainConfig) {
             fmt.Printf("[%v] 同步任务异常: %v\n", config.Name, r)
           }
         }()
-        lastBlockStr, err := kv.Get(config.Name + ":last_block")
-        if err != nil {
-          panic(err)
-        }
-        startBlock := config.StartBlock
-        if lastBlockStr != "" {
-          s, err := strconv.Atoi(lastBlockStr)
-          if err != nil {
-            panic(err)
-          }
-          startBlock = uint64(s) + 1
-        }
+        startBlock := getStartBlock(kvStore, config)
         client, err := chain.New(config.ChainId, config.NodeUrl2)
         if err != nil {
           panic(err)
         }
-        latestBlockNum, err := client.Client.BlockNumber(context.Background())
-        if err != nil {
-          panic(err)
-        }
-        endBlock := latestBlockNum - config.DelayBlocks
+        endBlock := getEndBlock(err, client, config)
         if startBlock > endBlock {
           return
         }
         fmt.Printf("任务开始: %v - %v\n", startBlock, endBlock)
-        tmpEnd := startBlock
-        var blocksPerQuery uint64 = 500
-        allEvents := make([]model.Event, 0)
-        allRecords := make([]model.TransferRecord, 0)
-        for ; tmpEnd <= endBlock; {
-          if tmpEnd > endBlock {
-            tmpEnd = endBlock
-          }
-          events, transferRecords := syncBlock(client, tmpEnd, tmpEnd+blocksPerQuery, config)
-          allRecords = append(allRecords, transferRecords...)
-          allEvents = append(allEvents, events...)
-          tmpEnd += blocksPerQuery
-        }
-        eventRepository.SaveAll(allEvents)
-        transferRecordRepository.SaveAll(allRecords)
-        err = kv.Set(config.Name+":last_block", strconv.Itoa(int(endBlock)))
-        block, err := client.Client.BlockByNumber(context.Background(), big.NewInt(int64(endBlock)))
-        err = kv.Set(config.Name+":last_block_time", strconv.Itoa(int(block.Time())))
-        if err != nil {
-          panic(err)
-        }
+        allEvents, allRecords := syncEvents(startBlock, endBlock, client, config)
+        saveDataToDB(allEvents, allRecords)
+        saveSyncStatusToKv(err, kvStore, config, endBlock, client)
         fmt.Printf("[%s]任务结束, 从[%v]到[%v]! \n", config.Name, startBlock, endBlock)
       })
       time.Sleep(time.Duration(interval) * time.Second) // 固定等待
     }
   })
+}
+
+func saveSyncStatusToKv(err error, kvStore kv.Store, config *config.ChainConfig, endBlock uint64, client *chain.Client) {
+  err = kvStore.Set(config.Name+":last_block", strconv.Itoa(int(endBlock)))
+  block, err := client.Client.BlockByNumber(context.Background(), big.NewInt(int64(endBlock)))
+  err = kvStore.Set(config.Name+":last_block_time", strconv.Itoa(int(block.Time())))
+  if err != nil {
+    panic(err)
+  }
+}
+
+func saveDataToDB(allEvents []model.Event, allRecords []model.TransferRecord) {
+  tx := db.Begin()
+  repository.NewEventRepository(tx).SaveAll(allEvents)
+  repository.NewTransferRecordRepository(tx).SaveAll(allRecords)
+  tx.Commit()
+}
+
+// 同步erc20事件
+func syncEvents(startBlock uint64, endBlock uint64, client *chain.Client, config *config.ChainConfig) ([]model.Event, []model.TransferRecord) {
+  tmpEnd := startBlock
+  var blocksPerQuery uint64 = 500
+  allEvents := make([]model.Event, 0)
+  allRecords := make([]model.TransferRecord, 0)
+  for ; tmpEnd <= endBlock; {
+    if tmpEnd > endBlock {
+      tmpEnd = endBlock
+    }
+    events, transferRecords := syncBlock(client, tmpEnd, tmpEnd+blocksPerQuery, config)
+    allRecords = append(allRecords, transferRecords...)
+    allEvents = append(allEvents, events...)
+    tmpEnd += blocksPerQuery
+  }
+  return allEvents, allRecords
+}
+
+func getEndBlock(err error, client *chain.Client, config *config.ChainConfig) uint64 {
+  // 获取最新区块
+  latestBlockNum, err := client.Client.BlockNumber(context.Background())
+  if err != nil {
+    panic(err)
+  }
+  // 同步的最大区块是 网络最新区块 - 延迟的区块数
+  endBlock := latestBlockNum - config.DelayBlocks
+  return endBlock
+}
+
+// 获取同步起始区块，在上一次同步的最大区块基础上+1，如果是第一次同步，那就用配置的起始区块
+func getStartBlock(kv kv.Store, config *config.ChainConfig) uint64 {
+  lastBlockStr, err := kv.Get(config.Name + ":last_block")
+  if err != nil {
+    panic(err)
+  }
+  startBlock := config.StartBlock
+  if lastBlockStr != "" {
+    s, err := strconv.Atoi(lastBlockStr)
+    if err != nil {
+      panic(err)
+    }
+    startBlock = uint64(s) + 1
+  }
+  return startBlock
 }
 
 func syncBlock(
@@ -135,10 +159,10 @@ func syncBlock(
     var evt interface{}
 
     switch eventHash {
-    case APPROVAL_HASH:
+    case ApprovalHash:
       modelEvent.Name = "Approval"
       evt = parseApprovalEvent(log)
-    case TRANSFER_HASH:
+    case TransferHash:
       modelEvent.Name = "Transfer"
       e := parseTransferEvent(log)
       evt = e
@@ -155,10 +179,10 @@ func syncBlock(
         transferRecords = append(transferRecords, transferRecord)
         transferSeen[transferRecord.Hash] = true
       }
-    case MINT_HASH:
+    case MintHash:
       modelEvent.Name = "Mint"
       evt = parseMintEvent(log)
-    case BURN_HASH:
+    case BurnHash:
       modelEvent.Name = "Burn"
       evt = parseBurnEvent(log)
     }
@@ -174,7 +198,6 @@ func syncBlock(
 
 func parseTransferEvent(log types.Log) *model.TransferEvent {
   event := &model.TransferEvent{}
-  // indexed 参数: Topics[1..]
   event.From = common.HexToAddress(log.Topics[1].Hex())
   event.To = common.HexToAddress(log.Topics[2].Hex())
   event.Value = new(big.Int).SetBytes(log.Data)
@@ -183,7 +206,6 @@ func parseTransferEvent(log types.Log) *model.TransferEvent {
 
 func parseApprovalEvent(log types.Log) *model.ApprovalEvent {
   event := &model.ApprovalEvent{}
-  // indexed 参数: Topics[1..]
   event.Owner = common.HexToAddress(log.Topics[1].Hex())
   event.Spender = common.HexToAddress(log.Topics[2].Hex())
   event.Value = new(big.Int).SetBytes(log.Data)
