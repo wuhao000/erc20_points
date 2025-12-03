@@ -1,0 +1,36 @@
+nodeApiKey: 3581cd61697a7f25a2b3abf8e0c1db7a566921b25e72acd6bc7f0531c85f9300
+#nodeApiKey: f05f2e17cd7a4b9caf9a06d507c042a1
+chains:
+#  - name: ethereum
+#    nodeUrl: https://mainnet.infura.io/v3/
+#    chianId: 1
+#    delayBlocks: 12
+#    contract-address: "0x0"
+#    polling-interval: 10 #单位：秒
+  - name: sepolia
+    nodeUrl: https://sepolia.infura.io/v3/
+    nodeUrl2: https://rpc.ankr.com/eth_sepolia/
+    chainId: 11155111
+    startBlock: 9744670
+    delayBlocks: 6
+    contractAddress: "0xA30B56CedB0a0a65FBf45c4f0C37C17E73Ca249C"
+#  - name: base-sepolia
+#    nodeUrl: https://sepolia.base.infura.io/v3/
+#    chainId: 84532
+#    delayBlocks: 8
+#    contractAddress: "0x0"
+events:
+  - Mint
+  - Burn
+  - Transfer
+  - Approval
+redis:
+  host: localhost:6379
+  type: node
+database:
+  dialect: postgres
+  database: erc20_points
+  username: postgres
+  password: postgres
+  host: 192.168.1.16
+  port: 15432
